@@ -2,6 +2,9 @@
     class AuthChecker {
         constructor(runtime) {
             this.runtime = runtime;
+            this.lastStatus = 0;
+            this.lastText = '';
+            this.lastRedirected = false;
         }
 
         getInfo() {
@@ -11,50 +14,67 @@
                 blocks: [
                     {
                         opcode: 'checkAuth',
-                        blockType: Scratch.BlockType.BOOLEAN,
-                        text: 'is user authenticated?',
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: 'check authentication',
                     },
                     {
-                        opcode: 'checkAuthMessage',
+                        opcode: 'authStatusCode',
                         blockType: Scratch.BlockType.REPORTER,
-                        text: 'auth status message',
+                        text: 'last status code',
+                    },
+                    {
+                        opcode: 'authResponseText',
+                        blockType: Scratch.BlockType.REPORTER,
+                        text: 'last response text',
+                    },
+                    {
+                        opcode: 'authRedirected',
+                        blockType: Scratch.BlockType.BOOLEAN,
+                        text: 'was redirected?',
                     }
                 ]
             };
         }
 
+        // Trigger the async fetch
         async checkAuth() {
             try {
                 const response = await fetch('https://blankzzgamehub.pythonanywhere.com/check-auth', {
                     method: 'GET',
-                    credentials: 'include', // include cookies for session
+                    credentials: 'include',
+                    redirect: 'manual', // important: prevent auto-follow
                 });
-                return response.ok && response.status !== 302;
+
+                this.lastStatus = response.status;
+                this.lastRedirected = response.type === 'opaqueredirect' || response.status === 302;
+
+                // Try to read text, will fail if redirected
+                try {
+                    this.lastText = await response.text();
+                } catch (err) {
+                    this.lastText = '[Redirected, no content]';
+                }
             } catch (err) {
-                console.error('[AuthChecker]', err);
-                return false;
+                this.lastStatus = 0;
+                this.lastText = `Fetch error: ${err.message}`;
+                this.lastRedirected = false;
             }
         }
 
-        async checkAuthMessage() {
-            try {
-                const response = await fetch('https://blankzzgamehub.pythonanywhere.com/check-auth', {
-                    method: 'GET',
-                    credentials: 'include',
-                });
-                if (response.ok && response.status !== 302) return 'Authenticated';
-                else if (response.status === 302) return 'Redirected (not authenticated)';
-                else return `Error: ${response.status}`;
-            } catch (err) {
-                return `Fetch error: ${err.message}`;
-            }
+        authStatusCode() {
+            return this.lastStatus;
+        }
+
+        authResponseText() {
+            return this.lastText;
+        }
+
+        authRedirected() {
+            return this.lastRedirected;
         }
     }
 
-    // Register the extension safely
     if (typeof Scratch !== 'undefined' && Scratch.extensions) {
         Scratch.extensions.register(new AuthChecker());
-    } else {
-        console.warn('[AuthChecker] TurboWarp/Scratch environment not found');
     }
 })();
